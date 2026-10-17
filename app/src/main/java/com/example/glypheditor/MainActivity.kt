@@ -29,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.unit.dp
 import com.example.glypheditor.ui.theme.GlyphEditorTheme
 import com.nothing.ketchum.GlyphMatrixManager
@@ -68,8 +69,10 @@ class MainActivity : ComponentActivity() {
             val pixels =
                 remember { mutableStateListOf<Boolean>().apply { repeat(169) { add(false) } } }
             var brightness by remember { mutableStateOf(255) }
+            var brightnessLocked by remember { mutableStateOf(false) }
             var patternName by remember { mutableStateOf("") }
             var showSaveDialog by remember { mutableStateOf(false) }
+            var showLoadDialog by remember { mutableStateOf(false) }
             val prefs =
                 getSharedPreferences("glyph_patterns", MODE_PRIVATE)
             val savedPatterns =
@@ -91,9 +94,18 @@ class MainActivity : ComponentActivity() {
                             pixels = pixels,
                             onClear = { pixels.replaceAll { false } },
                             brightness = brightness,
-                            onBrightnessChange = { brightness = it },
+                            onBrightnessChange = { newBrightness ->
+                                if (!brightnessLocked) {
+                                    brightness = newBrightness
+                                }
+                            },
+                            brightnessLocked = brightnessLocked,
+                            onBrightnessLockToggle = {
+                                brightnessLocked = !brightnessLocked
+                            },
                             onInvert = { pixels.replaceAll { !it } },
-                            onSave = { showSaveDialog = true }
+                            onSave = { showSaveDialog = true },
+                            onLoad = { showLoadDialog = true }
                         )
                         if (showSaveDialog) {
                             AlertDialog(onDismissRequest = { showSaveDialog = false },
@@ -123,6 +135,42 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                                     }
+                        if (showLoadDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showLoadDialog = false },
+                                title = { Text("Load Pattern") },
+                                text = {
+                                    Column {
+                                        if (savedPatterns.isEmpty()) {
+                                            Text("No saved patterns yet.")
+                                        } else {
+                                            savedPatterns.sorted().forEach { name ->
+                                                Text(
+                                                    text = name,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            val data = prefs.getString(name, null)
+                                                            if (data != null && data.length == 169) {
+                                                                data.forEachIndexed { index, char ->
+                                                                    pixels[index] = char == '1'
+                                                                }
+                                                                showLoadDialog = false
+                                                            }
+                                                        }
+                                                        .padding(12.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                },
+                                confirmButton = {
+                                    TextButton(onClick = { showLoadDialog = false }) {
+                                        Text("Cancel")
+                                    }
+                                }
+                            )
+                        }
                                     }
                                 }
                     }
@@ -136,9 +184,12 @@ fun GlyphGrid(
     onClear: () -> Unit,
     brightness: Int,
     onBrightnessChange: (Int) -> Unit,
+    brightnessLocked: Boolean,
+    onBrightnessLockToggle: () -> Unit,
     onInvert: () -> Unit,
-    onSave: () -> Unit
-) {
+    onSave: () -> Unit,
+    onLoad: () -> Unit
+)  {
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
@@ -155,7 +206,7 @@ fun GlyphGrid(
             }
 
             Button(
-                onClick = { },
+                onClick = onLoad,
                 modifier = Modifier.weight(1f)
             ) {
                 Text("Load")
@@ -170,7 +221,6 @@ fun GlyphGrid(
                 .pointerInput(Unit) {
                     var paintState = true
                     val visitedPixels = mutableSetOf<Int>()
-
                     detectDragGestures(
                         onDragStart = { offset ->
                             visitedPixels.clear()
@@ -225,9 +275,15 @@ fun GlyphGrid(
                                 .aspectRatio(1f)
                                 .padding(3.dp)
                                 .background(
-                                    color = if (isOn) Color.White else Color.DarkGray,
+                                    color = if (isOn) {
+                                        Color.White.copy(alpha = brightness / 255f)
+                                            .compositeOver(Color.Black)
+                                    } else {
+                                        Color.DarkGray
+                                    },
                                     shape = RoundedCornerShape(35)
                                 )
+
                                 .clickable {
                                     pixels[index] = !pixels[index]
                                 }
@@ -237,23 +293,22 @@ fun GlyphGrid(
             }
         }
 
-        // Brightness / Lock
+// Brightness / Lock
         Row(
             modifier = Modifier.fillMaxWidth()
         ) {
             Slider(
                 value = brightness.toFloat(),
-                onValueChange = {
-                    onBrightnessChange(it.toInt())
-                },
+                onValueChange = { onBrightnessChange(it.toInt()) },
                 valueRange = 0f..255f,
+                enabled = !brightnessLocked,
                 modifier = Modifier.weight(1f)
             )
 
             Button(
-                onClick = { }
+                onClick = onBrightnessLockToggle
             ) {
-                Text("Lock")
+                Text(if (brightnessLocked) "Unlock" else "Lock")
             }
         }
 
